@@ -18,17 +18,25 @@ OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  Adapted by/for FlyOnSpeed.org, 2021. lenny@flyonspeed.org
 */
 
+#define VERSION "3.3.1"
+
 //#define SERIALDATADEBUG   // show serial packet debug
-//#define IAS_IN_MPH        // uncomment this line for IAS in MPH, otherwise it will display in Kts;
 //#define DUMMY_SERIAL_DATA // dummy serial data for display test
+//#define IAS_IN_MPH        // uncomment this line for IAS in MPH, otherwise it will display in Kts;
 
-//#define REPEATER
-//#define SIM_DATA
+//#define REPEATER_MODE       // Used to turn on settings for video recorder repeater
+//#define VAC_MODE            // Used to turn on Vac specific features
 
-#define VERSION "3.3.0"
-
-#ifdef REPEATER
+#if defined(REPEATER_MODE)
 #define firmwareVersion "R" VERSION
+#define IAS_IN_MPH        // uncomment this line for IAS in MPH, otherwise it will display in Kts;
+#define DATAMARK_DISPLAY
+
+#elif defined(VAC_MODE)
+#define firmwareVersion "V" VERSION
+#define IAS_IN_MPH        // uncomment this line for IAS in MPH, otherwise it will display in Kts;
+#define DATAMARK_DISPLAY
+
 #else
 #define firmwareVersion VERSION
 #endif
@@ -46,17 +54,16 @@ OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <WiFiClient.h>
 #include <WiFiAP.h>
 #include <WebServer.h>
-#include <ESPmDNS.h>
 #include <Update.h>
 #include <Preferences.h>
 Preferences preferences;
 
 WebServer server(80);
 
-const char* host         = "display";
 const char* ssid         = "OnSpeedDisplay";
 const char* password     = "angleofattack";
 bool        fwUpdateMode = false;
+uint8_t     aiIP[4]      = {192, 168, 0, 2};
 
 // Some values from In_eSPI.h for reference
 // Not sure I understand what is going on here
@@ -97,7 +104,7 @@ uint64_t        flashTime           = millis();
 uint64_t        numbersUpdateTime;
 uint64_t        serialMillis        = millis();
 uint64_t        gHistoryTime        = millis();
-#ifndef REPEATER
+#ifndef REPEATER_MODE
 uint16_t        displayBrightness   = 255;
 int16_t         displayType         = 0;
 #else
@@ -235,8 +242,7 @@ void setup()
             gdraw.drawString("Wifi SSID: "+String(ssid),20,70);
             gdraw.drawString("Password: "+String(password),20,100);
             gdraw.drawString("Browse to:",20,140);
-            gdraw.drawString("http://"+String(host)+".local/upgrade",20,170);
-
+            gdraw.drawString("http://"+String(aiIP[0])+"."+String(aiIP[1])+"."+String(aiIP[2])+"."+String(aiIP[3])+"."+"/upgrade",20,170);
             gdraw.setTextDatum(ML_DATUM);
             gdraw.drawString("v"+String(firmwareVersion),5,215);
 
@@ -251,7 +257,7 @@ void setup()
             WiFi.softAP(ssid, password);
             delay(100); // wait to init softAP
 
-            IPAddress Ip(192, 168, 0, 2);
+            IPAddress Ip(aiIP[0], aiIP[1], aiIP[2], aiIP[3]);
             IPAddress NMask(255, 255, 255, 0);
             WiFi.softAPConfig(Ip, Ip, NMask);
             IPAddress myIP = WiFi.softAPIP();
@@ -260,11 +266,9 @@ void setup()
             Serial.println(myIP);
             delay(100);
 
-            MDNS.begin(host);
             server.begin();
 
-            MDNS.addService("http", "tcp", 80);
-            /*handling uploading firmware file */
+            // Handle uploading firmware file
             server.on("/upgrade", HTTP_GET, handleUpgrade);
             server.on("/", HTTP_GET, handleIndex);
 
@@ -344,12 +348,12 @@ void setup()
     if (fwUpdateMode) 
         return; // do not continue if firmware upgrade mode was selected.
 
+#if !defined(DUMMY_SERIAL_DATA)
     //select serial port from preferences or detect it
     serialSetup();
-
     Serial.begin(115200); // console serial
-
     delay (100);
+#endif
 
 } // end setup()
 
@@ -369,7 +373,9 @@ void loop()
         {
             fwUpdateMode = false;
             WiFi.softAPdisconnect (true);
+#if !defined(DUMMY_SERIAL_DATA)
             serialSetup(); // firmware update canceled, set up serial port
+#endif
         }
         return;
     } // end if fwUpdateMode
@@ -644,7 +650,8 @@ void displayAOA()
 
     gdraw.setFreeFont(FSSB18);
     gdraw.setTextColor (TFT_WHITE);
-    gdraw.setCursor(140, 27);
+    if (displayPercentLift < 100) gdraw.setCursor(140, 27);
+    else                          gdraw.setCursor(133, 27);
     gdraw.printf ("%02d", displayPercentLift);
 
     if (numericDisplay)
@@ -658,7 +665,6 @@ void displayAOA()
         gdraw.setCursor(278, 90);
         gdraw.setTextColor (TFT_GREEN);
         gdraw.print("G");
-
 
         gdraw.setFreeFont(FSSB18);
         // update IAS numeric display
@@ -679,15 +685,15 @@ void displayAOA()
         // flaps
         gdraw.fillCircle (23, 204, 16, TFT_GREY);
         //top, bottom, right
-        int cX=23;
-        int cY=204;
-        int Radius=16;
-        int triangleTopX=int(cX+sin(FlapPos*PI/180)*Radius);
-        int triangleTopY=int(cY-cos(FlapPos*PI/180)*Radius);
-        int triangleBottomX=int(cX-sin(FlapPos*PI/180)*Radius);
-        int triangleBottomY=int(cY+cos(FlapPos*PI/180)*Radius);
-        int triangleRightX=int(cX+cos(FlapPos*PI/180)*(Radius+33));
-        int triangleRightY=int(cY+sin(FlapPos*PI/180)*(Radius+33));
+        int cX              =  23;
+        int cY              = 204;
+        int Radius          =  16;
+        int triangleTopX    = int(cX+sin(FlapPos*PI/180)*Radius);
+        int triangleTopY    = int(cY-cos(FlapPos*PI/180)*Radius);
+        int triangleBottomX = int(cX-sin(FlapPos*PI/180)*Radius);
+        int triangleBottomY = int(cY+cos(FlapPos*PI/180)*Radius);
+        int triangleRightX  = int(cX+cos(FlapPos*PI/180)*(Radius+33));
+        int triangleRightY  = int(cY+sin(FlapPos*PI/180)*(Radius+33));
         gdraw.fillTriangle(triangleTopX, triangleTopY, triangleBottomX, triangleBottomY, triangleRightX, triangleRightY, TFT_GREY);
         gdraw.drawPixel(triangleRightX, triangleRightY, TFT_BLACK); // blunt the flap tip 1 pixel
         //gdraw.fillCircle (23, 204, 14, TFT_BLACK);
@@ -735,7 +741,7 @@ void displayAOA()
     gdraw.drawLine (306, 119, 312, 119, TFT_GREY);
     gdraw.drawLine (306, 120, 312, 120, TFT_GREY);
 
-#ifdef REPEATER
+#if defined(DATAMARK_DISPLAY)
     // Draw Data Mark value
     gdraw.setFreeFont(FM12);
     gdraw.setTextColor (TFT_WHITE);
@@ -890,8 +896,23 @@ void drawAOA(uint16_t X0, uint16_t Y0, uint16_t W, uint16_t H, float AOA, boolea
     /*
     Index pointer
     */
-    gdraw.fillRect (X0 - W / 2, mapAOA2Display(AOA, Array), W, H / 24, TFT_WHITE);
-    gdraw.drawRect (X0 - W / 2, mapAOA2Display(AOA, Array), W, H / 24, TFT_BLACK);
+    int indexY = mapAOA2Display(AOA, Array);
+
+    // Put up one bar if below percent lift numeric display
+    // 1 is top of display, 192 is bottom
+    if (indexY > 30)
+    {
+        gdraw.fillRect (X0 - W / 2, indexY, W, H / 24, TFT_WHITE);
+        gdraw.drawRect (X0 - W / 2, indexY, W, H / 24, TFT_BLACK);
+    }
+    // Else split bar
+    else
+    {
+        gdraw.fillRect (X0 - W / 2, indexY, W / 2 - 30, H / 24, TFT_WHITE);
+        gdraw.drawRect (X0 - W / 2, indexY, W / 2 - 30, H / 24, TFT_BLACK);
+        gdraw.fillRect (X0 + 30,    indexY, W / 2 - 30, H / 24, TFT_WHITE);
+        gdraw.drawRect (X0 + 30,    indexY, W / 2 - 30, H / 24, TFT_BLACK);
+    }
 
     /*
      Draw marker dots for maximum climb rate
