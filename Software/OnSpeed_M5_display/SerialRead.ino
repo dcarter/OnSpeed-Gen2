@@ -183,7 +183,8 @@ void SerialProcess()
 
     // smooth the noisier inputs
     SmoothedLateralG   = SmoothedLateralG * slipSmoothingAlpha+(1-slipSmoothingAlpha)*LateralG;
-    Slip               = int(SmoothedLateralG * 34 / 0.075); //.075g=half ball, .15g= 1 ball
+//  Slip               = int(SmoothedLateralG * 34 / 0.075); //.075g=half ball, .15g= 1 ball
+    Slip               = int(SmoothedLateralG * 34 / 0.04); 
     Slip               = constrain(Slip,-99,99);
     SmoothedAOA        = SmoothedAOA * aoaSmoothingAlpha + (1-aoaSmoothingAlpha) * AOA;
 

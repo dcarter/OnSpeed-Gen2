@@ -18,7 +18,7 @@ OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  Adapted by/for FlyOnSpeed.org, 2021. lenny@flyonspeed.org
 */
 
-#define VERSION "3.3.1"
+#define VERSION "3.3.2"
 
 //#define SERIALDATADEBUG   // show serial packet debug
 //#define DUMMY_SERIAL_DATA // dummy serial data for display test
@@ -40,9 +40,6 @@ OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #else
 #define firmwareVersion VERSION
 #endif
-
-// todo:
-// add wifi IP address to firmware upgrade display
 
 #include <GaugeWidgets.h>
 #include <M5Stack.h>
@@ -242,9 +239,9 @@ void setup()
             gdraw.drawString("Wifi SSID: "+String(ssid),20,70);
             gdraw.drawString("Password: "+String(password),20,100);
             gdraw.drawString("Browse to:",20,140);
-            gdraw.drawString("http://"+String(aiIP[0])+"."+String(aiIP[1])+"."+String(aiIP[2])+"."+String(aiIP[3])+"."+"/upgrade",20,170);
+            gdraw.drawString("http://"+String(aiIP[0])+"."+String(aiIP[1])+"."+String(aiIP[2])+"."+String(aiIP[3])+"/upgrade",20,170);
             gdraw.setTextDatum(ML_DATUM);
-            gdraw.drawString("v"+String(firmwareVersion),5,215);
+            gdraw.drawString(String(firmwareVersion),5,215);
 
             gdraw.setFreeFont(FSSB12);
             gdraw.setTextColor (TFT_RED);
@@ -633,10 +630,12 @@ void loop()
 
 // -----------------------------------------------
 
+// Update AOA display
+
 void displayAOA()
 {
-    // update AOA display
-    // build Setpoint array
+    // Build Setpoint array
+    // --------------------
     AOAThresholds[0] = 0.0001;
     AOAThresholds[1] = OnSpeedTonesOnAOA - 0.1;
     AOAThresholds[2] = OnSpeedTonesOnAOA;
@@ -648,15 +647,34 @@ void displayAOA()
 
     drawAOA(wgtX0, wgtY0, wgtWidth, wgtHeight, SmoothedAOA, flashFlag, AOAThresholds);
 
+    // Draw the percent lift display
+    // -----------------------------
+    #define PERCENT_X_POS   140
+    #define PERCENT_Y_POS    27     // Top of chevron
+//  #define PERCENT_Y_POS   182     // Bottom of chevron
+
     gdraw.setFreeFont(FSSB18);
+
+    // Black background boarder
+    gdraw.setTextColor (TFT_BLACK);
+    for (int xoffset = -3; xoffset <=3; xoffset += 3)
+        for (int yoffset = -3; yoffset <=3; yoffset += 3)
+        {
+            if (displayPercentLift < 100) gdraw.setCursor(PERCENT_X_POS  +xoffset, PERCENT_Y_POS+yoffset);
+            else                          gdraw.setCursor(PERCENT_X_POS-7+xoffset, PERCENT_Y_POS+yoffset);
+            gdraw.printf ("%02d", displayPercentLift);
+        }
+
+    // White text
     gdraw.setTextColor (TFT_WHITE);
-    if (displayPercentLift < 100) gdraw.setCursor(140, 27);
-    else                          gdraw.setCursor(133, 27);
+    if (displayPercentLift < 100) gdraw.setCursor(PERCENT_X_POS,   PERCENT_Y_POS);
+    else                          gdraw.setCursor(PERCENT_X_POS-7, PERCENT_Y_POS);
     gdraw.printf ("%02d", displayPercentLift);
 
     if (numericDisplay)
     {
         // Update airspeed numeric display
+        // -------------------------------
         gdraw.setFreeFont(FSS18);
 
         gdraw.setCursor(5, 90);
@@ -673,6 +691,7 @@ void displayAOA()
         gdraw.print (int(displayIAS));
 
         // Update G-force numeric display
+        // ------------------------------
         gdraw.setFreeFont(FSSB18);
         gdraw.setTextColor (TFT_WHITE);
         //gdraw.setCursor(235, 130);
@@ -682,7 +701,8 @@ void displayAOA()
         gdraw.setTextDatum(MR_DATUM);
         gdraw.drawString(GStr,305,118);
 
-        // flaps
+        // Update flaps display
+        // --------------------
         gdraw.fillCircle (23, 204, 16, TFT_GREY);
         //top, bottom, right
         int cX              =  23;
@@ -715,10 +735,11 @@ void displayAOA()
     } // end if numeric display
 
     // Update ball display
-
+    // -------------------
     drawSlip(80, 204, 160, 34, Slip, flashFlag, AOAThresholds);
 
     // Update gOnset rates
+    // -------------------
     // draw gOnset line
     if (gOnsetRate != 0.0)
     {
@@ -743,6 +764,7 @@ void displayAOA()
 
 #if defined(DATAMARK_DISPLAY)
     // Draw Data Mark value
+    // --------------------
     gdraw.setFreeFont(FM12);
     gdraw.setTextColor (TFT_WHITE);
     gdraw.setCursor(10, 15);
@@ -897,22 +919,8 @@ void drawAOA(uint16_t X0, uint16_t Y0, uint16_t W, uint16_t H, float AOA, boolea
     Index pointer
     */
     int indexY = mapAOA2Display(AOA, Array);
-
-    // Put up one bar if below percent lift numeric display
-    // 1 is top of display, 192 is bottom
-    if (indexY > 30)
-    {
-        gdraw.fillRect (X0 - W / 2, indexY, W, H / 24, TFT_WHITE);
-        gdraw.drawRect (X0 - W / 2, indexY, W, H / 24, TFT_BLACK);
-    }
-    // Else split bar
-    else
-    {
-        gdraw.fillRect (X0 - W / 2, indexY, W / 2 - 30, H / 24, TFT_WHITE);
-        gdraw.drawRect (X0 - W / 2, indexY, W / 2 - 30, H / 24, TFT_BLACK);
-        gdraw.fillRect (X0 + 30,    indexY, W / 2 - 30, H / 24, TFT_WHITE);
-        gdraw.drawRect (X0 + 30,    indexY, W / 2 - 30, H / 24, TFT_BLACK);
-    }
+    gdraw.fillRect (X0 - W / 2, indexY, W, H / 24, TFT_WHITE);
+    gdraw.drawRect (X0 - W / 2, indexY, W, H / 24, TFT_BLACK);
 
     /*
      Draw marker dots for maximum climb rate
@@ -1445,38 +1453,120 @@ int map2int(float AOA, float inLow, float inHigh, int outLow, int outHigh)
 
 
 // -----------------------------------------------
+// Upgrade web server routines
+// -----------------------------------------------
+
+String HtmlStyle = 
+    "<style  type='text/css' media='screen'>\n"
+    "body {\n"
+    "    display: inline-block;\n"
+    "    padding: 1.0em;\n"
+    "    border: 3px;\n"
+    "    border-style: solid;\n"
+    "    border-radius: 15px;\n"
+    "    }\n"
+    "</style>\n";
+
+String HtmlTitle =
+    "<center>\n"
+    "    <h2><u>FlyONSPEED M5 Display</u><br>Upgrade Server</h2>\n"
+    "    <h3>Current Ver "firmwareVersion"</h3>\n"
+    "</center>\n";
+
+// -----------------------------------------------
 
 void handleUpgrade()
 {
     String page = "";
-    page += "<html><body><br><br><p>Upgrade display firmware via binary (.bin) file upload\
-        <br><br>Note: Please make sure you are uploading the M5 .bin file not the PicoKit .bin!<br><br>";
-    page += "<form method='POST' action='/upload' enctype='multipart/form-data' id='upload_form'>\
-        <input type='file' name='update'><br><br>\
-        <input class='redbutton' type='submit' value='Upload'>\
-        </form></body></html>";
+
+    page += "<html>\n";
+
+    page += "<head>\n";
+    page += HtmlStyle;
+    page += "</head>\n";
+
+    page += "<body>\n";
+    page += HtmlTitle;
+    page +=
+        "<div>\n"
+        "<p>Upgrade display firmware via binary (.bin) file upload</p>\n"
+        "<p>Note: Please make sure you are uploading the M5 .bin file not the PicoKit .bin!</p>\n"
+        "<form method='POST' action='/upload' enctype='multipart/form-data' id='upload_form'>\n"
+        "<input type='file' name='update'>\n"
+        "<p/>\n"
+        "<input class='redbutton' type='submit' value='Upload'>\n"
+        "</form>\n"
+        "</div>\n";
+    page += "</body>\n";
+
+    page += "</html>";
+
     server.send(200, "text/html", page);
 }
-
 
 // -----------------------------------------------
 
 void handleUpgradeSuccess()
 {
     String page = "";
-    page += "<html><body><br><br><br><br><span style=\"color:black\">Firmware upgrade complete. Wait a few seconds until the display reboots.</span></p><br><br><br><br>";
-    page += "<script>setInterval(function () { document.getElementById('rebootprogress').value+=0.1; document.getElementById('rebootprogress').innerHTML=document.getElementById('rebootprogress').value+'%'}, 10);setTimeout(function () { window.location.href = \"/\";}, 10000);</script>";
-    page += "<div align=\"center\"><progress id=\"rebootprogress\" max=\"100\" value=\"0\"> 0% </progress></div></body></html>";
+
+    page += "<html>\n";
+
+    page += "<head>\n";
+    page += HtmlStyle;
+    page += "</head>\n";
+
+    page += "<body>\n";
+    page += HtmlTitle;
+    page +=
+        "<span style=\"color:black\">\n"
+        "Firmware upgrade complete.<br>\n"
+        "Wait a few seconds until the new software version reboots.\n"
+        "</span>\n";
+
+    page += 
+        "<script>\n"
+        "setInterval(function () \n"
+        "    { \n"
+        "    document.getElementById('rebootprogress').value+=0.1; \n"
+        "    document.getElementById('rebootprogress').innerHTML=document.getElementById('rebootprogress').value+'%'\n"
+        "    }, 10);\n"
+        "setTimeout(function () \n"
+        "    { \n"
+        "    window.location.href = \"/\";\n"
+        "    }, 10000);\n"
+        "</script>\n";
+
+    page += 
+        "<div align=\"center\">\n";
+        "<progress id=\"rebootprogress\" max=\"100\" value=\"0\"> 0% </progress>\n";
+        "</div>\n";
+
+    page += "</body></html>\n";
     server.send(200, "text/html", page);
 }
-
 
 // -----------------------------------------------
 
 void handleUpgradeFailure()
 {
     String page = "";
-    page += "<html><body><br><br><br><br><span style=\"color:red\">Firmware upgrade failed. Power cycle the display and try again.</span></p><br><br><br><br></body></html>";
+
+    page += "<html>\n";
+
+    page += "<head>\n";
+    page += HtmlStyle;
+    page += "</head>\n";
+
+    page += "<body>\n";
+    page += HtmlTitle;
+
+    page += 
+        "<span style=\"color:red\">\n"
+        "Firmware upgrade failed. Power cycle the display and try again.\n"
+        "</span>\n";
+
+    page += "</body></html>\n";
     server.send(200, "text/html", page);
 }
 
@@ -1486,11 +1576,23 @@ void handleUpgradeFailure()
 void handleIndex()
 {
     String page = "";
-    page += "<html><body><br><br><br><br><span style=\"color:black\"><b>OnSpeed M5 Display Upgrade server</b></span></p><br><br><a href=\"/upgrade\">Upgrade now</a><br><br></body></html>";
+    page += "<html>\n";
+
+    page += "<head>\n";
+    page += HtmlStyle;
+    page += "</head>\n";
+
+    page += "<body>\n";
+    page += HtmlTitle;
+    page += "<a href=\"/upgrade\">Upgrade now</a>\n";
+    page += "</body></html>\n";
+
     server.send(200, "text/html", page);
 }
 
 
+// -----------------------------------------------
+// Other routines
 // -----------------------------------------------
 
 unsigned int checkSerial()
@@ -1564,7 +1666,7 @@ void displaySplashScreen()
     gdraw.drawString("Fly OnSpeed",160,60);
 
     gdraw.setFreeFont(FSS9);
-    gdraw.drawString("version: "+String(firmwareVersion),160,120);
+    gdraw.drawString("Version: "+String(firmwareVersion),160,120);
     gdraw.drawString("To upgrade press Center button",160,220);
     gdraw.pushSprite (0, 0);
     gdraw.deleteSprite();
