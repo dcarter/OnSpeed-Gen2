@@ -138,6 +138,11 @@
 #define BOOM_PACKET_SIZE  50
 #define EFIS_PACKET_SIZE 512
 
+// config strings (upstream 3c0ca39 refactored WifiSerial.ino to assume these are global)
+String configString="";
+String checksumString="";
+String configContent="";
+
 // type definitions
 typedef struct  {
   int Count;
