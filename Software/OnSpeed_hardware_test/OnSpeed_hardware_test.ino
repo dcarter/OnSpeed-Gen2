@@ -22,34 +22,67 @@
 
 #include <i2c_t3.h> // multiport i2c (Wire.h needs to redirect here, otherwise it gets duplicated. Make a Wire.h library with an #include <i2c_t3.h> line in it.
 #include <Audio.h>
-#include <SD.h> 
+#include <SD.h>
 #include "AudioSampleOnspeed_left_speaker.h"
 #include "AudioSampleOnspeed_right_speaker.h"
 
+// ==== IMU type selection ====
+// Uncomment exactly one of these to match the IMU chip installed in this box.
+// Mirrors the same switch in Software/OnSpeedTeensy_AHRS/local_config.h.
+#define IMUTYPE_LSM9DS1        // original IMU
+//#define IMUTYPE_ISM330DHCX   // newer IMU, less temperature drift
+
+#if defined(IMUTYPE_LSM9DS1) && defined(IMUTYPE_ISM330DHCX)
+  #error "Define only one of IMUTYPE_LSM9DS1 / IMUTYPE_ISM330DHCX, not both"
+#endif
+#if !defined(IMUTYPE_LSM9DS1) && !defined(IMUTYPE_ISM330DHCX)
+  #error "Define one of IMUTYPE_LSM9DS1 or IMUTYPE_ISM330DHCX above"
+#endif
+
 // IMU defines
 #define I2C_COMMUNICATION_TIMEOUT 1000  // microseconds
-#define LSM9DS1_AccelGyro 0x6B
-#define LSM9DS1_Magnet    0x1E
-// LSM9DS1 Accel/Gyro (XL/G) Registers
-#define CTRL_REG5_XL      0x1F
-#define CTRL_REG6_XL      0x20
-#define CTRL_REG7_XL      0x21
-#define OUT_X_L_XL        0x28
-#define CTRL_REG4         0x1E
-#define CTRL_REG1_G       0x10
-#define OUT_X_L_G         0x18
+
+#ifdef IMUTYPE_LSM9DS1
+  #define _i2cAddress_AccelGyro 0x6B // chip address
+  #define LSM9DS1_Magnet    0x1E
+  // LSM9DS1 Accel/Gyro (XL/G) Registers
+  #define CTRL_REG5_XL      0x1F
+  #define CTRL_REG6_XL      0x20
+  #define CTRL_REG7_XL      0x21
+  #define OUT_X_L_XL        0x28
+  #define CTRL_REG4         0x1E
+  #define CTRL_REG1_G       0x10
+  #define OUT_X_L_G         0x18
+  // IMU variables
+  float aRes=0.000244140625; // 8g / 32768.0
+  float gRes=500.0 / 32768.0; // full scale / resolution
+  uint8_t Ascale = 3;     // accel full scale, 8G
+  uint8_t Aodr = 6;   // accel data sample rate,  AODR_952Hz
+  uint8_t Abw = 3;      // accel data bandwidth,  ABW_50Hz
+  uint8_t Gscale = 1;   // 500 degree/sec
+  uint8_t Godr = 6;     // GODR_952Hz
+  uint8_t Gbw = 2;    // 58 Hz at Godr = 952 Hz
+#endif
+
+#ifdef IMUTYPE_ISM330DHCX
+  // ISM330DHCX registers
+  #define _i2CAddressISM330 0x6A // chip address on I2C bus
+  #define CTRL1_XL   0x10 // accelerometer control register
+  #define CTRL2_G    0x11 // gyro control register
+  #define CTRL3_C    0x12
+  #define CTRL4_C    0x13
+  #define CTRL7_G    0x16
+  #define CTRL9_XL   0x18
+  #define OUTX_L_A   0x28 // start of accelerometer output address
+  #define OUTX_L_G   0x22 // start of gyro output address
+  #define FIFO_CTRL4 0x0A
+  float aRes=8.0 / 32768.0; // full scale / resolution (8G)
+  float gRes=250.0 / 32768.0; // full scale / resolution (250dps)
+#endif
+
 // IMU variables
-uint8_t _i2cAddress_AccelGyro=LSM9DS1_AccelGyro;
 volatile int16_t ax, ay, az; // ax -instantaneous
 volatile int16_t gx, gy, gz; // gx - instantaneous
-float aRes=0.000244140625; // 8g / 32768.0
-float gRes=500.0 / 32768.0; // full scale / resolution
-uint8_t Ascale = 3;     // accel full scale, 8G
-uint8_t Aodr = 6;   // accel data sample rate,  AODR_952Hz
-uint8_t Abw = 3;      // accel data bandwidth,  ABW_50Hz
-uint8_t Gscale = 1;   // 500 degree/sec
-uint8_t Godr = 6;     // GODR_952Hz
-uint8_t Gbw = 2;    // 58 Hz at Godr = 952 Hz
 
 #define VOLUME_PIN            A20  // pin 39 used for audio volume, pin 10 on DB15
 #define PIN_LED2              5    // external LED for showing AOA status
@@ -71,7 +104,11 @@ AudioConnection          patchCord6(ampLeft, 0, dacs, 0);
 AudioConnection          patchCord7(ampRight, 0, dacs, 1);
 
 // SD card
+#ifdef SdFat_h
+FsFile sdFile;
+#else
 File sdFile;
+#endif
 
 void setup()
 {
@@ -82,6 +119,12 @@ pinMode(PIN_LED2, OUTPUT);
 pinMode(SWITCH_PIN, INPUT_PULLUP);
 Serial.begin(115200); // init console serial
 delay(500);
+#ifdef IMUTYPE_LSM9DS1
+Serial.println("IMU type: LSM9DS1");
+#endif
+#ifdef IMUTYPE_ISM330DHCX
+Serial.println("IMU type: ISM330DHCX");
+#endif
 
 // set up i2c ports
 Wire.begin (I2C_MASTER,0x00,I2C_PINS_18_19,I2C_PULLUP_EXT,400000); // SDA0/SCL0 I2C at 400kHz, PS1 sensor, Pfwd   
@@ -343,20 +386,36 @@ while ((Wire1.available() < 4) && (micros()-waitStart<timeout)){}
 
 bool readAccelGyro()
 {
-  uint8_t temp_a[6]; // We'll read six bytes from the accelerometer into temp 
-  if (I2CreadBytes(_i2cAddress_AccelGyro,OUT_X_L_XL, temp_a, 6)<0) return false; // Read 6 bytes, beginning at OUT_X_L_XL  
+  uint8_t temp_a[6]; // We'll read six bytes from the accelerometer into temp
+  uint8_t temp_g[6];  // x/y/z gyro register data stored here
+
+#ifdef IMUTYPE_LSM9DS1
+  if (I2CreadBytes(_i2cAddress_AccelGyro,OUT_X_L_XL, temp_a, 6)<0) return false; // Read 6 bytes, beginning at OUT_X_L_XL
   ax = (temp_a[1] << 8) | temp_a[0]; // Store x-axis values into ax
   ay = (temp_a[3] << 8) | temp_a[2]; // Store y-axis values into ay
-  az = (temp_a[5] << 8) | temp_a[4]; // Store z-axis values into az  
+  az = (temp_a[5] << 8) | temp_a[4]; // Store z-axis values into az
   //Serial.printf("ax:%.2f,ay:%.2f,az:%.2f\n",ax*aRes,ay*aRes,az*aRes);
-  uint8_t temp_g[6];  // x/y/z gyro register data stored here
   if (I2CreadBytes(_i2cAddress_AccelGyro, OUT_X_L_G, temp_g,6)<0) return false;  // Read the six raw data registers sequentially into data array
   gx = (temp_g[1] << 8) | temp_g[0]; // Store x-axis values into gx
   gy = (temp_g[3] << 8) | temp_g[2]; // Store y-axis values into gy
-  gz = (temp_g[5] << 8) | temp_g[4]; // Store z-axis values into gz  
+  gz = (temp_g[5] << 8) | temp_g[4]; // Store z-axis values into gz
   //Serial.printf("gx:%.2f,gy:%.2f,gz:%.2f\n",gx*gRes,gy*gRes,gz*gRes);
+#endif
+
+#ifdef IMUTYPE_ISM330DHCX
+  if (I2CreadBytesISM330(_i2CAddressISM330,OUTX_L_A, temp_a, 6)<0) return false; // Read 6 bytes, beginning at OUTX_L_A
+  ax = (temp_a[1] << 8) | temp_a[0]; // Store x-axis values into ax
+  ay = (temp_a[3] << 8) | temp_a[2]; // Store y-axis values into ay
+  az = (temp_a[5] << 8) | temp_a[4]; // Store z-axis values into az
+  //Serial.printf("ax:%.2f,ay:%.2f,az:%.2f\n",ax*aRes,ay*aRes,az*aRes);
+  if (I2CreadBytesISM330(_i2CAddressISM330, OUTX_L_G, temp_g,6)<0) return false; // Read the six raw data registers sequentially into data array
+  gx = (temp_g[1] << 8) | temp_g[0]; // Store x-axis values into gx
+  gy = (temp_g[3] << 8) | temp_g[2]; // Store y-axis values into gy
+  gz = (temp_g[5] << 8) | temp_g[4]; // Store z-axis values into gz
+  //Serial.printf("gx:%.2f,gy:%.2f,gz:%.2f\n",gx*gRes,gy*gRes,gz*gRes);
+#endif
+
   return true;
-  
 }
 
 int I2CreadBytes(uint8_t i2cAddress, uint8_t registerAddress, uint8_t * dest, uint8_t count)
@@ -381,26 +440,73 @@ int I2CreadBytes(uint8_t i2cAddress, uint8_t registerAddress, uint8_t * dest, ui
  if (micros()-waitStart >=timeout)
           {
           return -1;
-          } 
+          }
   for (int i=0; i<count;)
-  {    
-      dest[i++] = Wire1.read();   
+  {
+      dest[i++] = Wire1.read();
   }
   return count;
 }
 
+#ifdef IMUTYPE_ISM330DHCX
+int I2CreadBytesISM330(uint8_t i2cAddress, uint8_t registerAddress, uint8_t * dest, uint8_t count)
+{
+  // Same as I2CreadBytes() but without the 0x80 auto-increment OR - the ISM330DHCX
+  // auto-increments the register address natively and doesn't use that bit.
+  unsigned long timeout = I2C_COMMUNICATION_TIMEOUT;
+  Wire1.beginTransmission(i2cAddress);
+  Wire1.write(registerAddress);
+  Wire1.endTransmission(I2C_STOP,I2C_COMMUNICATION_TIMEOUT);
+  Wire1.requestFrom(i2cAddress, count,I2C_STOP,I2C_COMMUNICATION_TIMEOUT);
+
+  unsigned long waitStart=micros();
+  while ((Wire1.available() < count) && (micros()-waitStart<timeout))
+         {
+         }
+  if (micros()-waitStart >=timeout)
+          {
+          return -1;
+          }
+  for (int i=0; i<count;)
+  {
+      dest[i++] = Wire1.read();
+  }
+  return count;
+}
+#endif
+
 void initAccelGyro()
 {
+#ifdef IMUTYPE_LSM9DS1
  // enable the three axes of the accelerometer
  I2CwriteByte(_i2cAddress_AccelGyro,CTRL_REG5_XL,  0x38);
  // configure the accelerometer-specify bandwidth selection with Abw
  I2CwriteByte(_i2cAddress_AccelGyro,CTRL_REG6_XL, Aodr << 5 | Ascale << 3 | 0x04 | Abw);
- 
+
  // enable the three axes of the gyroscope
  I2CwriteByte(_i2cAddress_AccelGyro, CTRL_REG4, 0x38);
  // configure the gyroscope
  I2CwriteByte(_i2cAddress_AccelGyro, CTRL_REG1_G, Godr << 5 | Gscale << 3 | Gbw);
- 
+#endif
+
+#ifdef IMUTYPE_ISM330DHCX
+ // enable accelerometer
+ I2CwriteByte(_i2CAddressISM330,CTRL1_XL, B01011100); // 208hz ODR, +/-8G, LPF2 disabled
+ delay(50);
+ // enable gyroscope
+ I2CwriteByte(_i2CAddressISM330,CTRL2_G, B01010000); // 208hz, 250dps
+ delay(50);
+ // disable gyroscope hi-pass filter
+ I2CwriteByte(_i2CAddressISM330,CTRL7_G, B00000000); // high performance mode, disable high pass filter
+ delay(50);
+ // disable LPF1
+ I2CwriteByte(_i2CAddressISM330,CTRL4_C, B00000000); // disable low pass filter 1, LPF2 still on at 67hz bandwidth
+ delay(50);
+ // set fifo
+ I2CwriteByte(_i2CAddressISM330,FIFO_CTRL4, B00110000); // bypass mode, fifo disabled
+ delay(50);
+ I2CwriteByte(_i2CAddressISM330,CTRL9_XL, B11100001);
+#endif
 }
 
 void I2CwriteByte(uint8_t i2cAddress, uint8_t registerAddress, uint8_t data)
